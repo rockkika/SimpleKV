@@ -6,11 +6,10 @@ import (
 	"6.5840/tester1"
 )
 
-
 type Clerk struct {
 	clnt    *tester.Clnt
 	servers []string
-	leader int // last successful leader (index into servers[])
+	leader  int // last successful leader (index into servers[])
 	// You can add to this struct.
 }
 
@@ -37,7 +36,32 @@ func (ck *Clerk) Leader() int {
 func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
 
 	// You will have to modify this function.
-	return "", 0, ""
+	for {
+		server := ck.leader
+		args := &rpc.GetArgs{Key: key}
+		reply := &rpc.GetReply{}
+		ok := ck.clnt.Call(ck.servers[server], "KVServer.Get", args, reply)
+		if ok == false {
+			ck.leader += 1
+			ck.leader %= len(ck.servers)
+			continue
+		} else {
+			if reply.Err == rpc.ErrWrongLeader {
+				ck.leader += 1
+				ck.leader %= len(ck.servers)
+				continue
+			}
+			if reply.Err == rpc.OK {
+				return reply.Value, reply.Version, rpc.OK
+			}
+			if reply.Err == rpc.ErrNoKey {
+				return "", 0, rpc.ErrNoKey
+			}
+		}
+		ck.leader += 1
+		ck.leader %= len(ck.servers)
+
+	}
 }
 
 // Put updates key with value only if the version in the
@@ -59,5 +83,29 @@ func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
 // arguments. Additionally, reply must be passed as a pointer.
 func (ck *Clerk) Put(key string, value string, version rpc.Tversion) rpc.Err {
 	// You will have to modify this function.
-	return ""
+	retried := false
+	for {
+		server := ck.leader
+		args := &rpc.PutArgs{Key: key, Value: value, Version: version}
+		reply := &rpc.PutReply{}
+		ok := ck.clnt.Call(ck.servers[server], "KVServer.Put", args, reply)
+		if ok == false {
+			ck.leader += 1
+			ck.leader %= len(ck.servers)
+			retried = true
+			continue
+		} else {
+			if reply.Err == rpc.ErrWrongLeader {
+				ck.leader += 1
+				ck.leader %= len(ck.servers)
+				retried = true
+				continue
+			} else if reply.Err == rpc.ErrVersion && retried == true {
+				return rpc.ErrMaybe
+			} else {
+				return reply.Err
+			}
+		}
+	}
+
 }
