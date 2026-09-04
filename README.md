@@ -2,7 +2,7 @@
 
 这是我在学习分布式系统时完成的一组课程作业，原始要求可以从[作业页面](https://pdos.csail.mit.edu/6.824/)查看。项目从 MapReduce 和一个带版本号的 KV Server 开始，逐步实现 Raft、基于 Raft 的 KV 服务，最后再把数据拆到多个 shard group 中，并处理配置变更、数据迁移和 controller 恢复。代码主要用于学习和实验，不是生产级实现。
 
-一开始我没有完全理解 Raft 就开始做，认为有 AI 手把手教我写代码，我会慢慢理解。但实际上这是一个大坑：刚开始做时，我会让 AI 一行一行解释代码、解释为什么这么做，结果却是越写越懵。我认为开始这份作业前必须真正理解 [Raft](https://pdos.csail.mit.edu/6.824/papers/raft-extended.pdf)，包括它为什么比 Multi-Paxos 更“understandable”。最好也先读懂 [single-decree Paxos](https://pdos.csail.mit.edu/6.824/papers/paxos-simple.pdf)以及它如何扩展成 Multi-Paxos：single-decree Paxos 本身很容易理解，而顺着论文感受 Paxos 如何一步步推导，再看看扩展到 Multi-Paxos 时困难出在哪里，也就会慢慢理解 Raft 为什么要做出那些设计。
+一开始我没有完全理解 Raft 就开始做，认为有 AI 手把手教我写代码，我会慢慢理解。但实际上这是一个大坑：刚开始做时，我会让 AI 一行一行解释代码、解释为什么这么做，结果却是越写越懵。我认为开始这份作业前必须真正理解 [Raft](https://pdos.csail.mit.edu/6.824/papers/raft-extended.pdf)，包括它为什么比 Multi-Paxos 更“understandable”。最好也先读懂 [single-decree Paxos](https://pdos.csail.mit.edu/6.824/papers/paxos-simple.pdf)以及它如何扩展成 Multi-Paxos。single-decree Paxos 本身很容易理解，而顺着论文感受 Paxos 如何一步步推导，再看看扩展到 Multi-Paxos 时困难出在哪里，也就会慢慢理解 Raft 为什么要做出那些设计。
 
 我认为稳定理解 Raft 最重要的抓手不是心跳，而是“多数派一定相交”。一条日志被提交需要多数派确认，一个新 leader 当选也需要多数派投票，所以提交多数派和之后的选举多数派之间一定至少有一个共同节点。仅有相交还不够，Raft 又通过投票时的日志新旧检查、term 和日志匹配规则，让已经提交的历史不能被一个日志更旧的 candidate 绕过去。于是更准确的说法是：**下一个 leader 不一定来自上一次成功复制日志的那批节点，但它必须获得一个与旧多数派相交的选举多数派，并且自己的日志足够新，因此不会丢掉已经提交的日志。** [Raft 论文](https://pdos.csail.mit.edu/6.824/papers/raft-extended.pdf)把这些约束组织成了比较容易实现的 leader、term 和连续日志；[Paxos 论文](https://pdos.csail.mit.edu/6.824/papers/paxos-simple.pdf)背后也有同一个核心想法：不同 quorum 必然相交，后来的提案必须继承交点中已经接受的值。
 
