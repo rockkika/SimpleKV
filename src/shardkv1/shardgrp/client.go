@@ -5,7 +5,10 @@ import (
 	"6.5840/shardkv1/shardcfg"
 	"6.5840/shardkv1/shardgrp/shardrpc"
 	"6.5840/tester1"
+	"time"
 )
+
+const retryInterval = 10 * time.Millisecond
 
 type Clerk struct {
 	*tester.Clnt
@@ -103,6 +106,7 @@ func (ck *Clerk) FreezeShard(s shardcfg.Tshid, num shardcfg.Tnum) ([]byte, rpc.E
 
 		if !ok || reply.Err == rpc.ErrWrongLeader {
 			ck.leader = (ck.leader + 1) % len(ck.servers)
+			time.Sleep(retryInterval)
 			continue
 		}
 
@@ -130,6 +134,7 @@ func (ck *Clerk) InstallShard(s shardcfg.Tshid, state []byte, num shardcfg.Tnum)
 
 		if !ok || reply.Err == rpc.ErrWrongLeader {
 			ck.leader = (ck.leader + 1) % len(ck.servers)
+			time.Sleep(retryInterval)
 			continue
 		}
 
@@ -156,6 +161,7 @@ func (ck *Clerk) DeleteShard(s shardcfg.Tshid, num shardcfg.Tnum) rpc.Err {
 
 		if !ok || reply.Err == rpc.ErrWrongLeader {
 			ck.leader = (ck.leader + 1) % len(ck.servers)
+			time.Sleep(retryInterval)
 			continue
 		}
 

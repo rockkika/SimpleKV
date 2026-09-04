@@ -11,12 +11,15 @@ package shardkv
 import (
 	"6.5840/shardkv1/shardcfg"
 	"6.5840/shardkv1/shardgrp"
+	"time"
 
 	"6.5840/kvsrv1/rpc"
 	"6.5840/kvtest1"
 	"6.5840/shardkv1/shardctrler"
 	"6.5840/tester1"
 )
+
+const retryInterval = 10 * time.Millisecond
 
 type Clerk struct {
 	clnt *tester.Clnt
@@ -55,6 +58,7 @@ func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
 		shard := shardcfg.Key2Shard(key)
 		gid, servers, ok := cfg.GidServers(shard)
 		if !ok {
+			time.Sleep(retryInterval)
 			continue
 		}
 		groupClerk, exist := ck.rcks[gid]
@@ -71,8 +75,10 @@ func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
 			return "", 0, rpc.ErrNoKey
 
 		case rpc.ErrWrongGroup:
+			time.Sleep(retryInterval)
 			continue
 		case rpc.ErrWrongLeader:
+			time.Sleep(retryInterval)
 			continue
 
 		}
@@ -90,6 +96,7 @@ func (ck *Clerk) Put(key string, value string, version rpc.Tversion) rpc.Err {
 		shard := shardcfg.Key2Shard(key)
 		gid, servers, ok := cfg.GidServers(shard)
 		if !ok {
+			time.Sleep(retryInterval)
 			continue
 		}
 
@@ -104,9 +111,11 @@ func (ck *Clerk) Put(key string, value string, version rpc.Tversion) rpc.Err {
 		switch err {
 		case rpc.ErrWrongGroup:
 			rerouted = true
+			time.Sleep(retryInterval)
 			continue
 		case rpc.ErrWrongLeader:
 			rerouted = true
+			time.Sleep(retryInterval)
 			continue
 
 		case rpc.ErrVersion:
