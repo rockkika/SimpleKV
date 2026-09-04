@@ -14,6 +14,7 @@ import (
 )
 
 const currentConfigKey = "current-config"
+
 const nextConfigKey = "next-config"
 
 // ShardCtrler for the controller and kv clerk.
@@ -61,7 +62,8 @@ func (sck *ShardCtrler) initConfigKey(key string, cfg *shardcfg.ShardConfig) {
 // controller. In part A, this method doesn't need to do anything. In
 // B and C, this method implements recovery.
 func (sck *ShardCtrler) InitController() {
-	currentValue, currentVersion, currentErr := sck.Get(currentConfigKey)
+	currentValue, currentVersion, currentErr :=
+		sck.Get(currentConfigKey)
 	if currentErr != rpc.OK {
 		return
 	}
@@ -73,11 +75,22 @@ func (sck *ShardCtrler) InitController() {
 
 	current := shardcfg.FromString(currentValue)
 	next := shardcfg.FromString(nextValue)
+
+	// 两者相同，说明没有未完成的迁移。
+	if next.Num <= current.Num {
+		return
+	}
+
+	// 正常迁移只能前进一个配置编号。
 	if next.Num != current.Num+1 {
 		return
 	}
 
-	sck.completeConfigChange(current, next, currentVersion)
+	sck.completeConfigChange(
+		current,
+		next,
+		currentVersion,
+	)
 }
 
 // Called once by the tester to supply the first configuration.  You
@@ -116,18 +129,25 @@ func (sck *ShardCtrler) ChangeConfigTo(new *shardcfg.ShardConfig) {
 	}
 
 	recordedNext := shardcfg.FromString(nextValue)
-	if recordedNext.Num > old.Num {
-		if recordedNext.Num != old.Num+1 {
+	wanted := new.String()
+	if recordedNext.Num == new.Num {
+		if nextValue != wanted {
 			return
 		}
-		sck.completeConfigChange(old, recordedNext, version)
+		sck.completeConfigChange(old, new, version)
 		return
 	}
 	if recordedNext.Num != old.Num {
 		return
 	}
+	putErr := sck.Put(nextConfigKey, wanted, nextVersion)
 
-	if sck.Put(nextConfigKey, new.String(), nextVersion) != rpc.OK {
+	if putErr == rpc.ErrMaybe || putErr == rpc.ErrVersion {
+		actual, _, getErr := sck.Get(nextConfigKey)
+		if getErr != rpc.OK || actual != wanted {
+			return
+		}
+	} else if putErr != rpc.OK {
 		return
 	}
 	sck.completeConfigChange(old, new, version)
