@@ -14,6 +14,7 @@ import (
 )
 
 const currentConfigKey = "current-config"
+const nextConfigKey = "next-config"
 
 // ShardCtrler for the controller and kv clerk.
 type ShardCtrler struct {
@@ -60,6 +61,23 @@ func (sck *ShardCtrler) initConfigKey(key string, cfg *shardcfg.ShardConfig) {
 // controller. In part A, this method doesn't need to do anything. In
 // B and C, this method implements recovery.
 func (sck *ShardCtrler) InitController() {
+	currentValue, currentVersion, currentErr := sck.Get(currentConfigKey)
+	if currentErr != rpc.OK {
+		return
+	}
+
+	nextValue, _, nextErr := sck.Get(nextConfigKey)
+	if nextErr != rpc.OK {
+		return
+	}
+
+	current := shardcfg.FromString(currentValue)
+	next := shardcfg.FromString(nextValue)
+	if next.Num != current.Num+1 {
+		return
+	}
+
+	sck.completeConfigChange(current, next, currentVersion)
 }
 
 // Called once by the tester to supply the first configuration.  You
@@ -69,6 +87,7 @@ func (sck *ShardCtrler) InitController() {
 // lists shardgrp shardcfg.Gid1 for all shards.
 func (sck *ShardCtrler) InitConfig(cfg *shardcfg.ShardConfig) {
 	sck.initConfigKey(currentConfigKey, cfg)
+	sck.initConfigKey(nextConfigKey, cfg)
 }
 
 // Called by the tester to ask the controller to change the
@@ -88,6 +107,27 @@ func (sck *ShardCtrler) ChangeConfigTo(new *shardcfg.ShardConfig) {
 	}
 
 	if new.Num != old.Num+1 {
+		return
+	}
+
+	nextValue, nextVersion, nextErr := sck.Get(nextConfigKey)
+	if nextErr != rpc.OK {
+		return
+	}
+
+	recordedNext := shardcfg.FromString(nextValue)
+	if recordedNext.Num > old.Num {
+		if recordedNext.Num != old.Num+1 {
+			return
+		}
+		sck.completeConfigChange(old, recordedNext, version)
+		return
+	}
+	if recordedNext.Num != old.Num {
+		return
+	}
+
+	if sck.Put(nextConfigKey, new.String(), nextVersion) != rpc.OK {
 		return
 	}
 	sck.completeConfigChange(old, new, version)
