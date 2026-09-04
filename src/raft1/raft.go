@@ -838,6 +838,8 @@ func (rf *Raft) replicationWorker(peer int) {
 				if matched+1 > rf.nextIndex[peer] {
 					rf.nextIndex[peer] = matched + 1
 				}
+				rf.pushForwardLocked()
+
 				rf.mu.Unlock()
 				break
 			}
@@ -870,6 +872,28 @@ func (rf *Raft) replicationWorker(peer int) {
 		}
 	}
 }
+func (rf *Raft) pushForwardLocked() {
+	majority := len(rf.peers)/2 + 1
+
+	for N := rf.lastLogIndexLocked(); N > rf.commitIndex; N-- {
+
+		if rf.logTermLocked(N) != rf.currentTerm {
+			continue
+		}
+
+		accepted := 0
+		for peer := range rf.peers {
+			if rf.matchIndex[peer] >= N {
+				accepted++
+			}
+		}
+
+		if accepted >= majority {
+			rf.commitIndex = N
+			break
+		}
+	}
+}
 
 func (rf *Raft) startHeartbeat() {
 	for {
@@ -878,26 +902,7 @@ func (rf *Raft) startHeartbeat() {
 		rf.mu.Lock()
 
 		if rf.role == LEADER {
-			majority := len(rf.peers)/2 + 1
-
-			for N := rf.lastLogIndexLocked(); N > rf.commitIndex; N-- {
-
-				if rf.logTermLocked(N) != rf.currentTerm {
-					continue
-				}
-
-				accepted := 0
-				for peer := range rf.peers {
-					if rf.matchIndex[peer] >= N {
-						accepted++
-					}
-				}
-
-				if accepted >= majority {
-					rf.commitIndex = N
-					break
-				}
-			}
+			rf.pushForwardLocked()
 
 			shouldSend = true
 		}

@@ -1,22 +1,30 @@
 package rsm
 
 import (
+	"fmt"
+	"math/rand"
 	"sync"
+	"time"
 
 	"6.5840/kvsrv1/rpc"
 	"6.5840/labrpc"
 	"6.5840/raft1"
 	"6.5840/raftapi"
 	"6.5840/tester1"
-
 )
 
+type OpId struct {
+	Server int
+	UniId  int
+}
 type Op struct {
 	// Your definitions here.
 	// Field names must start with capital letters,
 	// otherwise RPC will break.
+	Me  int
+	Id  int
+	Req any
 }
-
 
 // A server (i.e., ../server.go) that wants to replicate itself calls
 // MakeRSM and must implement the StateMachine interface.  This
@@ -37,7 +45,11 @@ type RSM struct {
 	applyCh      chan raftapi.ApplyMsg
 	maxraftstate int // snapshot if log grows this big
 	sm           StateMachine
+
 	// Your definitions here.
+	uniId    int
+	resultCh map[OpId]chan any
+	done     chan struct{}
 }
 
 // servers[] contains the ports of the set of
@@ -61,10 +73,17 @@ func MakeRSM(servers []*labrpc.ClientEnd, me int, persister *tester.Persister, m
 		maxraftstate: maxraftstate,
 		applyCh:      make(chan raftapi.ApplyMsg),
 		sm:           sm,
+		uniId:        rand.Int(),
+		resultCh:     make(map[OpId]chan any),
+		done:         make(chan struct{}),
 	}
 	if !tester.UseRaftStateMachine {
 		rsm.rf = raft.Make(servers, me, persister, rsm.applyCh)
 	}
+	if persister.SnapshotSize() > 0 {
+		rsm.sm.Restore(persister.ReadSnapshot())
+	}
+	go rsm.reader()
 	return rsm
 }
 
@@ -72,10 +91,10 @@ func (rsm *RSM) Raft() raftapi.Raft {
 	return rsm.rf
 }
 
-
 // Submit a command to Raft, and wait for it to be committed.  It
 // should return ErrWrongLeader if client should find new leader and
 // try again.
+
 func (rsm *RSM) Submit(req any) (rpc.Err, any) {
 
 	// Submit creates an Op structure to run a command through Raft;
@@ -83,5 +102,71 @@ func (rsm *RSM) Submit(req any) (rpc.Err, any) {
 	// is the argument to Submit and id is a unique id for the op.
 
 	// your code here
-	return rpc.ErrWrongLeader, nil // i'm dead, try another server.
+	rsm.mu.Lock()
+	id := rsm.uniId
+	rsm.uniId++
+	op := Op{Me: rsm.me, Id: id, Req: req}
+	ch := make(chan any, 1)
+	opID := OpId{op.Me, op.Id}
+	rsm.resultCh[opID] = ch
+	defer func() {
+		rsm.mu.Lock()
+		delete(rsm.resultCh, opID)
+		rsm.mu.Unlock()
+	}()
+	rsm.mu.Unlock()
+	_, startTerm, isLeader := rsm.rf.Start(op)
+	if !isLeader {
+		return rpc.ErrWrongLeader, nil
+	}
+	for {
+		select {
+		case res := <-ch:
+			return rpc.OK, res
+		case <-time.After(50 * time.Millisecond):
+			currentTerm, isLeader := rsm.rf.GetState()
+
+			if !isLeader || currentTerm != startTerm {
+				return rpc.ErrWrongLeader, nil
+			}
+		case <-rsm.done:
+			return rpc.ErrWrongLeader, nil
+		}
+
+	}
+
+}
+func (rsm *RSM) reader() {
+	for {
+		msg, ok := <-rsm.applyCh
+		if !ok {
+			close(rsm.done)
+			return
+		}
+		if msg.CommandValid {
+			op, ok := msg.Command.(Op)
+			if !ok {
+				panic(fmt.Sprintf(
+					"rsm: applied command has type %T, want rsm.Op",
+					msg.Command,
+				))
+			}
+			result := rsm.sm.DoOp(op.Req)
+
+			if rsm.maxraftstate != -1 && rsm.rf.PersistBytes() >= rsm.maxraftstate {
+				snapshot := rsm.sm.Snapshot()
+				rsm.rf.Snapshot(msg.CommandIndex, snapshot)
+			}
+			rsm.mu.Lock()
+			ch, exist := rsm.resultCh[OpId{op.Me, op.Id}]
+			rsm.mu.Unlock()
+			if exist {
+				ch <- result
+			}
+		}
+		if msg.SnapshotValid {
+			rsm.sm.Restore(msg.Snapshot)
+		}
+
+	}
 }
