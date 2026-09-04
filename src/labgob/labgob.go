@@ -112,13 +112,11 @@ func checkType(t reflect.Type) {
 	}
 }
 
-//
 // warn if the value contains non-default values,
 // as it would if one sent an RPC but the reply
 // struct was already modified. if the RPC reply
 // contains default values, GOB won't overwrite
 // the non-default value.
-//
 func checkDefault(value interface{}) {
 	if value == nil {
 		return
@@ -175,3 +173,12 @@ func checkDefault1(value reflect.Value, depth int, name string) {
 		return
 	}
 }
+
+//1. Key2Shard("apple") 得到 shard 3
+//2. 客户端向 controller Query 当前配置
+//3. 配置显示 shard 3 → group 2
+//4. 客户端取得 group 2 的服务器列表
+//5. 创建/复用 group 2 的 Clerk
+//6. 向 group 2 发送 Put
+//7. group 2 通过自己的 Raft 提交 Put
+//8. 返回结果
